@@ -3,7 +3,7 @@ const OpenRAG = require('./index');
 // إعداد العميل (تذكر وضع رابط سيرفرك الحقيقي)
 const client = new OpenRAG({ 
     apiKey: 'sk_live_TEST_KEY',
-    serverUrl: 'https://daily-tami-realgamers24-7000e0d1.koyeb.app' 
+    serverUrl: 'https://openrag-grid.koyeb.app/' 
 });
 
 (async () => {
