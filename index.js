@@ -1,12 +1,12 @@
 const io = require('socket.io-client');
 const SimplePeer = require('simple-peer');
-const wrtc = require('@roamhq/wrtc'); // ✅ المكتبة الحديثة
+const wrtc = require('@roamhq/wrtc');
 
 class OpenRAG {
     /**
      * @param {Object} config
      * @param {string} config.apiKey - مفتاح الـ API الخاص بالمطور
-     * @param {string} [config.serverUrl] - رابط سيرفرك على Koyeb
+     * @param {string} [config.serverUrl] - رابط السيرفر
      */
     constructor(config) {
         if (!config || !config.apiKey) {
@@ -14,8 +14,8 @@ class OpenRAG {
         }
 
         this.apiKey = config.apiKey;
-        // 🔴 هام: ضع رابط مشروعك هنا (بدون / في النهاية)
-        this.serverUrl = config.serverUrl || 'https://openrag-grid.koyeb.app/'; 
+        // رابط السيرفر الرسمي الجديد
+        this.serverUrl = config.serverUrl || 'https://openrag-grid.koyeb.app'; 
         
         this.socket = null;
         this.isConnected = false;
@@ -24,7 +24,7 @@ class OpenRAG {
     // 1. الاتصال بالسيرفر الرئيسي
     connect() {
         return new Promise((resolve, reject) => {
-            console.log('🌐 OpenRAG: Connecting to Grid...');
+            // console.log('🌐 OpenRAG: Connecting to Grid...');
 
             this.socket = io(this.serverUrl, {
                 auth: { token: this.apiKey },
@@ -33,7 +33,7 @@ class OpenRAG {
             });
 
             this.socket.on('connect', () => {
-                console.log('✅ OpenRAG: Connected to Signaling Server.');
+                // console.log('✅ OpenRAG: Connected to Signaling Server.');
                 this.isConnected = true;
                 resolve(true);
             });
@@ -45,7 +45,7 @@ class OpenRAG {
         });
     }
 
-    // 2. طلب البيانات عبر عقدة سكنية
+    // 2. طلب البيانات
     async fetch(targetUrl) {
         if (!this.isConnected) {
             throw new Error("OpenRAG: Not connected. Call .connect() first.");
@@ -60,22 +60,39 @@ class OpenRAG {
                 this._startP2P(targetId, targetUrl, resolve, reject);
             };
 
-            this.socket.on('PEER_FOUND', onPeerFound);
-
-            // Timeout بعد 15 ثانية
-            setTimeout(() => {
+            const onNoPeers = () => {
                 this.socket.off('PEER_FOUND', onPeerFound);
                 reject(new Error("OpenRAG: No nodes available right now."));
-            }, 15000);
+            };
+
+            this.socket.on('PEER_FOUND', onPeerFound);
+            this.socket.once('NO_PEERS_AVAILABLE', onNoPeers);
+
+            // Timeout بعد 45 ثانية
+            setTimeout(() => {
+                this.socket.off('PEER_FOUND', onPeerFound);
+                this.socket.off('NO_PEERS_AVAILABLE', onNoPeers);
+                reject(new Error("OpenRAG: Request Timeout (Network Busy)."));
+            }, 45000);
         });
     }
 
-    // 3. إنشاء نفق WebRTC
+    // 3. إنشاء نفق WebRTC (هنا التعديل الحاسم 🔥)
     _startP2P(targetId, targetUrl, resolve, reject) {
         const p = new SimplePeer({
             initiator: true,
             trickle: false,
-            wrtc: wrtc // استخدام المكتبة المصححة
+            wrtc: wrtc,
+            // 👇 هذه الإعدادات ضرورية لاختراق شبكات الموبايل
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' }
+                ]
+            }
         });
 
         p.on('signal', (data) => {
@@ -108,6 +125,8 @@ class OpenRAG {
 
         p.on('error', (err) => {
             this.socket.off('SIGNAL_RECEIVED', onSignal);
+            // تجاهل أخطاء إغلاق القناة المعتادة
+            if (err.code === 'ERR_DATA_CHANNEL') return;
             reject(err);
         });
     }
