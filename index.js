@@ -15,7 +15,7 @@ class OpenRAG {
 
         this.apiKey = config.apiKey;
         // 🔴 هام: ضع رابط مشروعك هنا (بدون / في النهاية)
-        this.serverUrl = config.serverUrl || 'https://https://daily-tami-realgamers24-7000e0d1.koyeb.app'; 
+        this.serverUrl = config.serverUrl || 'https://openrag-grid.koyeb.app/'; 
         
         this.socket = null;
         this.isConnected = false;
