@@ -5,7 +5,7 @@ const wrtc = require('@roamhq/wrtc');
 class OpenRAG {
     /**
      * @param {Object} config
-     * @param {string} config.apiKey - مفتاح الـ API الخاص بالمطور
+     * @param {string} config.apiKey - مفتاح الـ API
      * @param {string} [config.serverUrl] - رابط السيرفر
      */
     constructor(config) {
@@ -14,18 +14,21 @@ class OpenRAG {
         }
 
         this.apiKey = config.apiKey;
-        // رابط السيرفر الرسمي الجديد
         this.serverUrl = config.serverUrl || 'https://openrag-grid.koyeb.app'; 
+        
+        // 1. القائمة الافتراضية (Google STUN) للسرعة
+        // سيتم تحديثها تلقائياً عند الاتصال بالسيرفر لتشمل Cloudflare
+        this.iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
         
         this.socket = null;
         this.isConnected = false;
     }
 
-    // 1. الاتصال بالسيرفر الرئيسي
+    // ==========================================
+    // 1. الاتصال بالسيرفر (Connection)
+    // ==========================================
     connect() {
         return new Promise((resolve, reject) => {
-            // console.log('🌐 OpenRAG: Connecting to Grid...');
-
             this.socket = io(this.serverUrl, {
                 auth: { token: this.apiKey },
                 reconnection: true,
@@ -33,26 +36,60 @@ class OpenRAG {
             });
 
             this.socket.on('connect', () => {
-                // console.log('✅ OpenRAG: Connected to Signaling Server.');
                 this.isConnected = true;
                 resolve(true);
             });
 
+            // 🔥 استلام إعدادات الشبكة الديناميكية (Cloudflare/TURN)
+            this.socket.on('ICE_CONFIG', (data) => {
+                if(data && data.iceServers && data.iceServers.length > 0) {
+                    this.iceServers = data.iceServers;
+                }
+            });
+
             this.socket.on('connect_error', (err) => {
-                console.error('❌ Connection Error:', err.message);
-                reject(err);
+                reject(new Error(`OpenRAG Connection Failed: ${err.message}`));
             });
         });
     }
 
-    // 2. طلب البيانات
+    // ==========================================
+    // 2. طلب البيانات (Fetch & Security)
+    // ==========================================
     async fetch(targetUrl) {
         if (!this.isConnected) {
             throw new Error("OpenRAG: Not connected. Call .connect() first.");
         }
 
+        const urlLower = targetUrl.toLowerCase();
+
+        // 🛡️ المستوى 1: الامتثال للقانون المصري (Egyptian Compliance)
+        // نمنع الطلب هنا لكي لا نورط اللاعب في أي شبهة
+        const forbiddenDomains = [
+            '.gov.eg',       // حكومي
+            '.mil.eg',       // عسكري
+            'cbe.org.eg',    // بنك مركزي
+            'mod.gov.eg',    // وزارة الدفاع
+            'porn', 'xxx',   // إباحي
+            'darkweb'        // دارك ويب
+        ];
+        
+        if (forbiddenDomains.some(d => urlLower.includes(d))) {
+            throw new Error(`OpenRAG Security: Request Blocked. Access to '${targetUrl}' is prohibited under Egyptian Cybercrime Law.`);
+        }
+
+        // 🛡️ المستوى 2: مكافحة الفيروسات (Malware Pre-Check)
+        // نمنع طلب الملفات التنفيذية من المنبع لتوفير الباندويدث وحماية الشبكة
+        const dangerousExts = [
+            '.exe', '.msi', '.bat', '.cmd', '.sh', '.php', '.pl', 
+            '.jar', '.vbs', '.apk', '.dmg', '.iso', '.bin'
+        ];
+
+        if (dangerousExts.some(ext => urlLower.endsWith(ext))) {
+            throw new Error(`OpenRAG Security: Request Blocked. Executable files (${dangerousExts.join(', ')}) are strictly forbidden.`);
+        }
+
         return new Promise((resolve, reject) => {
-            // طلب عقدة (Peer)
             this.socket.emit('REQUEST_PEER');
 
             const onPeerFound = ({ targetId }) => {
@@ -68,7 +105,7 @@ class OpenRAG {
             this.socket.on('PEER_FOUND', onPeerFound);
             this.socket.once('NO_PEERS_AVAILABLE', onNoPeers);
 
-            // Timeout بعد 45 ثانية
+            // Timeout 45s
             setTimeout(() => {
                 this.socket.off('PEER_FOUND', onPeerFound);
                 this.socket.off('NO_PEERS_AVAILABLE', onNoPeers);
@@ -77,21 +114,16 @@ class OpenRAG {
         });
     }
 
-    // 3. إنشاء نفق WebRTC (هنا التعديل الحاسم 🔥)
+    // ==========================================
+    // 3. نفق WebRTC (P2P Tunnel)
+    // ==========================================
     _startP2P(targetId, targetUrl, resolve, reject) {
         const p = new SimplePeer({
             initiator: true,
             trickle: false,
             wrtc: wrtc,
-            // 👇 هذه الإعدادات ضرورية لاختراق شبكات الموبايل
             config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' }
-                ]
+                iceServers: this.iceServers // 🔥 استخدام السيرفرات الديناميكية
             }
         });
 
@@ -105,14 +137,14 @@ class OpenRAG {
         this.socket.on('SIGNAL_RECEIVED', onSignal);
 
         p.on('connect', () => {
-            // إرسال طلب الجلب
+            // إرسال الرابط
             p.send(JSON.stringify({ url: targetUrl }));
         });
 
         p.on('data', (data) => {
             const response = JSON.parse(data.toString());
             
-            // تنظيف وإغلاق
+            // تنظيف
             this.socket.off('SIGNAL_RECEIVED', onSignal);
             p.destroy();
 
@@ -125,10 +157,18 @@ class OpenRAG {
 
         p.on('error', (err) => {
             this.socket.off('SIGNAL_RECEIVED', onSignal);
-            // تجاهل أخطاء إغلاق القناة المعتادة
-            if (err.code === 'ERR_DATA_CHANNEL') return;
+            if (err.code === 'ERR_DATA_CHANNEL') return; // تجاهل الأخطاء الطبيعية
             reject(err);
         });
+        
+        // Timeout للـ Handshake
+        setTimeout(() => {
+            if(!p.connected) {
+                 p.destroy();
+                 this.socket.off('SIGNAL_RECEIVED', onSignal);
+                 reject(new Error("OpenRAG: Connection Handshake Timeout."));
+            }
+        }, 40000);
     }
 
     disconnect() {
