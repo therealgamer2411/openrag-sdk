@@ -16,8 +16,8 @@ class OpenRAG {
         this.apiKey = config.apiKey;
         this.serverUrl = config.serverUrl || 'https://openrag-grid.koyeb.app'; 
         
-        // 1. القائمة الافتراضية (Google STUN) للسرعة
-        // سيتم تحديثها تلقائياً عند الاتصال بالسيرفر لتشمل Cloudflare
+        // 1. القائمة الافتراضية (Google STUN)
+        // سيتم تحديثها تلقائياً عند الاتصال بالسيرفر
         this.iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
         
         this.socket = null;
@@ -25,7 +25,7 @@ class OpenRAG {
     }
 
     // ==========================================
-    // 1. الاتصال بالسيرفر (Connection)
+    // 1. الاتصال بالسيرفر
     // ==========================================
     connect() {
         return new Promise((resolve, reject) => {
@@ -40,7 +40,7 @@ class OpenRAG {
                 resolve(true);
             });
 
-            // 🔥 استلام إعدادات الشبكة الديناميكية (Cloudflare/TURN)
+            // 🔥 استلام إعدادات Cloudflare الديناميكية
             this.socket.on('ICE_CONFIG', (data) => {
                 if(data && data.iceServers && data.iceServers.length > 0) {
                     this.iceServers = data.iceServers;
@@ -54,7 +54,7 @@ class OpenRAG {
     }
 
     // ==========================================
-    // 2. طلب البيانات (Fetch & Security)
+    // 2. طلب البيانات (مع الحماية القانونية)
     // ==========================================
     async fetch(targetUrl) {
         if (!this.isConnected) {
@@ -63,30 +63,24 @@ class OpenRAG {
 
         const urlLower = targetUrl.toLowerCase();
 
-        // 🛡️ المستوى 1: الامتثال للقانون المصري (Egyptian Compliance)
-        // نمنع الطلب هنا لكي لا نورط اللاعب في أي شبهة
+        // 🛡️ 1. الامتثال للقانون المصري (Pre-flight Check)
+        // نمنع الطلب من هنا لتوفير الوقت وحماية الشبكة
         const forbiddenDomains = [
-            '.gov.eg',       // حكومي
-            '.mil.eg',       // عسكري
-            'cbe.org.eg',    // بنك مركزي
-            'mod.gov.eg',    // وزارة الدفاع
-            'porn', 'xxx',   // إباحي
-            'darkweb'        // دارك ويب
+            '.gov.eg', '.mil.eg', 'cbe.org.eg', 'mod.gov.eg', 'porn', 'xxx', 'darkweb'
         ];
         
         if (forbiddenDomains.some(d => urlLower.includes(d))) {
             throw new Error(`OpenRAG Security: Request Blocked. Access to '${targetUrl}' is prohibited under Egyptian Cybercrime Law.`);
         }
 
-        // 🛡️ المستوى 2: مكافحة الفيروسات (Malware Pre-Check)
-        // نمنع طلب الملفات التنفيذية من المنبع لتوفير الباندويدث وحماية الشبكة
+        // 🛡️ 2. مكافحة الفيروسات (Malware Pre-Check)
         const dangerousExts = [
             '.exe', '.msi', '.bat', '.cmd', '.sh', '.php', '.pl', 
-            '.jar', '.vbs', '.apk', '.dmg', '.iso', '.bin'
+            '.jar', '.vbs', '.apk', '.dmg', '.iso', '.bin', '.dll'
         ];
 
         if (dangerousExts.some(ext => urlLower.endsWith(ext))) {
-            throw new Error(`OpenRAG Security: Request Blocked. Executable files (${dangerousExts.join(', ')}) are strictly forbidden.`);
+            throw new Error(`OpenRAG Security: Request Blocked. Executable files are strictly forbidden.`);
         }
 
         return new Promise((resolve, reject) => {
@@ -115,15 +109,18 @@ class OpenRAG {
     }
 
     // ==========================================
-    // 3. نفق WebRTC (P2P Tunnel)
+    // 3. نفق WebRTC (Trickle Enabled 🔥)
     // ==========================================
     _startP2P(targetId, targetUrl, resolve, reject) {
         const p = new SimplePeer({
             initiator: true,
-            trickle: false,
+            
+            // 🔥 هام جداً: تفعيل التقطير ليتوافق مع الهاتف ويمنع التايم أوت
+            trickle: true, 
+            
             wrtc: wrtc,
             config: {
-                iceServers: this.iceServers // 🔥 استخدام السيرفرات الديناميكية
+                iceServers: this.iceServers // استخدام السيرفرات الديناميكية
             }
         });
 
@@ -137,14 +134,13 @@ class OpenRAG {
         this.socket.on('SIGNAL_RECEIVED', onSignal);
 
         p.on('connect', () => {
-            // إرسال الرابط
+            // إرسال الرابط المطلوب
             p.send(JSON.stringify({ url: targetUrl }));
         });
 
         p.on('data', (data) => {
             const response = JSON.parse(data.toString());
             
-            // تنظيف
             this.socket.off('SIGNAL_RECEIVED', onSignal);
             p.destroy();
 
@@ -157,11 +153,11 @@ class OpenRAG {
 
         p.on('error', (err) => {
             this.socket.off('SIGNAL_RECEIVED', onSignal);
-            if (err.code === 'ERR_DATA_CHANNEL') return; // تجاهل الأخطاء الطبيعية
+            if (err.code === 'ERR_DATA_CHANNEL') return; 
             reject(err);
         });
         
-        // Timeout للـ Handshake
+        // Timeout للمصافحة
         setTimeout(() => {
             if(!p.connected) {
                  p.destroy();
